@@ -17,13 +17,6 @@ import torch.nn.functional as F
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from transformers.modeling_utils import PreTrainedModel
 
-torch.set_printoptions(
-    precision=7,      # number of decimal places
-    sci_mode=False,   # disable scientific notation
-    linewidth=200,    # how many chars per line
-    threshold=torch.inf
-)
-
 class Qwen3RotaryEmbedding(nn.Module):
     def __init__(self, config, device=None):
         super().__init__()
@@ -239,9 +232,10 @@ class Qwen3Model(PreTrainedModel):
         sin,
         eps
     ):
-    
-        #hidden_states_new = self.embed_tokens(input_ids)
         
+        #hidden_states_new = self.embed_tokens(input_ids)
+
+        # nn.embedding is replaced by gather op for easier tracing. Hence input is broadcasted to (1,1,1,self.config,hidden_size).   
         input_ids = self.broadcast * input_ids
         hidden_states = torch.gather(self.vocab_weights,0,input_ids)
              
