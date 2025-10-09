@@ -1,5 +1,5 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from modelling_qwen3 import  NNTrainerQwen3ForCausalLM, Qwen3RotaryEmbedding
+from custom_qwen3 import  NNTrainerQwen3ForCausalLM, Qwen3RotaryEmbedding
 import torch
 
 model_name = "Qwen/Qwen3-1.7B"
