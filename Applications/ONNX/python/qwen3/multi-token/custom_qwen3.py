@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from transformers.modeling_utils import PreTrainedModel
+from onnxscript.onnx_opset import opset23 as op 
 
 class Qwen3RotaryEmbedding(nn.Module):
     def __init__(self, config, device=None):
@@ -91,8 +92,8 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(q, k, cos, sin):
     
-    cos = cos.reshape(1,256,128)
-    sin = sin.reshape(1,256,128)
+    # cos = cos.reshape(1,256,128)
+    # sin = sin.reshape(1,256,128)
 
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
@@ -112,6 +113,37 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
     return hidden_states
 
+def self_attention(query,key,value,past_cache,layer_id,scaling,num_key_value_groups):
+    
+    if torch.onnx.is_in_onnx_export():
+        
+        past_k = past_cache.layers[layer_id].key
+        past_v = past_cache.layers[layer_id].value
+        atten_output,present_k,present_v,_ = torch.onnx.ops.attention(
+                query,
+                key,
+                value,
+                None,
+                past_k,
+                past_v,
+            )
+        return atten_output,present_k,present_v
+    
+    key, value = past_cache.update(key, value,layer_id)      
+    
+    key = repeat_kv(key, num_key_value_groups)
+    value = repeat_kv(value, num_key_value_groups)
+    
+    attn_weights = torch.matmul(query, key.transpose(2, 3))*scaling
+       
+    causal_mask = torch.full((1, 1, attn_weights.shape[-2], attn_weights.shape[-1]), float("-inf"))
+    causal_mask = torch.triu(causal_mask, diagonal=1) 
+    attn_weights = attn_weights + causal_mask 
+    
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1)
+    attn_output = torch.matmul(attn_weights, value)
+    attn_output = attn_output.transpose(1, 2).contiguous()
+    return attn_output  
 class Qwen3Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -125,11 +157,6 @@ class Qwen3Attention(nn.Module):
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
         
-        causal_mask = torch.full((1, 1, self.config.max_position_embeddings, self.config.max_position_embeddings), float("-inf"))
-        causal_mask = torch.triu(causal_mask, diagonal=1) 
-        self.register_buffer("attention_mask",causal_mask)
-        self.register_buffer("scaling_factor", torch.tensor([self.scaling], dtype=torch.float32))
-
         self.q_proj = nn.Linear(
             config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
         )
@@ -151,33 +178,25 @@ class Qwen3Attention(nn.Module):
         cos,
         sin,
         eps,
+        past_cache,
     ):
         _,_,slen,_ = hidden_states.shape
+       
         q_hidden_shape = (1,slen, self.config.num_attention_heads, self.head_dim)
         kv_hidden_shape = (1,slen, self.config.num_key_value_heads, self.head_dim)  
-        
- 
+         
         query_states = self.q_norm(self.q_proj(hidden_states).view(q_hidden_shape),eps).transpose(1, 2)
         key_states = self.k_norm(self.k_proj(hidden_states).view(kv_hidden_shape),eps).transpose(1, 2)
         value_states = self.v_proj(hidden_states).view(kv_hidden_shape).transpose(1, 2)      
         
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+                
+        attn_output = self_attention(query_states,key_states,value_states,past_cache,self.layer_idx,self.scaling,self.num_key_value_groups)   
         
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
-        
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))*self.scaling_factor      
-        attn_weights = attn_weights + self.attention_mask
-               
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-        attn_output = torch.matmul(attn_weights, value_states)
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(1, 1, slen, self.config.hidden_size).contiguous()
+        attn_output = attn_output.reshape(1, 1, slen,self.config.hidden_size).contiguous()    
         attn_output = self.o_proj(attn_output)
         
         return attn_output
-
-
 class Qwen3DecoderLayer(nn.Module):
     def __init__(self, config, layer_idx: int):
         super().__init__()
@@ -193,6 +212,7 @@ class Qwen3DecoderLayer(nn.Module):
         cos,
         sin,
         eps,
+        past_cache,
     ):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states,eps)
@@ -202,6 +222,7 @@ class Qwen3DecoderLayer(nn.Module):
             cos,
             sin,
             eps,
+            past_cache,
             )
         hidden_states = residual + hidden_states
 
@@ -218,7 +239,7 @@ class Qwen3Model(PreTrainedModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.register_buffer("vocab_weights",self.embed_tokens.weight)
-        self.register_buffer("broadcast",torch.ones(self.config.max_position_embeddings,config.hidden_size,dtype=torch.int64))
+        self.register_buffer("broadcast",torch.ones(1,config.hidden_size,dtype=torch.int64))
         
         self.layers = nn.ModuleList(
             [Qwen3DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
@@ -231,19 +252,22 @@ class Qwen3Model(PreTrainedModel):
         cos,
         sin,
         eps,
+        past_cache,
     ):
-      
+        slen,_ = input_ids.shape
         input_ids = self.broadcast * input_ids
         hidden_states = torch.gather(self.vocab_weights,0,input_ids)
                
         for decoder_layer in self.layers[:self.config.num_hidden_layers]:
-           
+            
             hidden_states = decoder_layer(
-                hidden_states.reshape(1,1,self.config.max_position_embeddings,self.config.hidden_size),
+                hidden_states.reshape(1,1,slen,self.config.hidden_size),
                 cos,
                 sin,
                 eps,
+                past_cache,
             )  
+            
         hidden_states = self.norm(hidden_states,eps)
         return hidden_states
         
@@ -261,13 +285,14 @@ class NNTrainerQwen3ForCausalLM(PreTrainedModel):
         cos,
         sin,
         eps,
+        past_cache,
     ):  
-        
         hidden_states = self.model(
             input_ids,
             cos,
             sin,
             eps,
+            past_cache,
         )
 
         logits = self.lm_head(hidden_states)
