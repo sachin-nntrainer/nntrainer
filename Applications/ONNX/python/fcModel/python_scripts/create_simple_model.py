@@ -1,5 +1,18 @@
+"""
+SPDX-License-Identifier: Apache-2.0
+Copyright (C) 2025 Sumon Nath <sumon.nath@samsung.com>
+
+@file create_simple_model.py
+@date 9 September 2025
+@brief This script creates a simple onnx fc model.
+@note This script has been tested with transformers version 4.55.0 and PyTorch version 2.8.0
+
+@author Sumon Nath <sumon.nath@samsung.com>
+"""
+
 import torch
 import torch.nn as nn
+
 
 class CustomModel(nn.Module):
     def __init__(self):
@@ -12,10 +25,11 @@ class CustomModel(nn.Module):
         self.linear2 = nn.Linear(5, 7, bias=False)
 
     def forward(self, x):
-        x = self.linear1(x)        # (2,2) -> (2,5)
-        x = x * self.mul_param     # elementwise mul (broadcast)
-        x = self.linear2(x)        # (2,5) -> (2,7)
+        x = self.linear1(x)  # (2,2) -> (2,5)
+        x = x * self.mul_param  # elementwise mul (broadcast)
+        x = self.linear2(x)  # (2,5) -> (2,7)
         return x
+
 
 # Create model & input
 model = CustomModel()
@@ -29,7 +43,7 @@ torch.onnx.export(
     "../simple_model.onnx",
     input_names=["input"],
     output_names=["output"],
-    opset_version=17
+    opset_version=17,
 )
 
 print("Model exported to custom_model_fixed.onnx (fixed shape 2x2 → 2x7)")
