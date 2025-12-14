@@ -35,3 +35,4 @@ for tensor in model.graph.initializer:
     }
     
     print(f"Saved {tensor.name} -> {filename}, dtype={arr.dtype}, shape={arr.shape}")
+    
