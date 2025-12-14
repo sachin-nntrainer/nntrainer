@@ -26,16 +26,16 @@ namespace nntrainer {
 void SliceLayer::finalize(InitLayerContext &context) {
   axis = std::get<props::Axis>(slice_props).get();
   start = std::get<props::StartIndex>(slice_props).get() - 1;
-  unsigned int end = std::get<props::EndIndex>(slice_props).get() - 1;
+  end = std::get<props::EndIndex>(slice_props).get() - 1;
 
   const TensorDim &in_dim = context.getInputDimensions()[0];
   TensorDim outputDim = context.getInputDimensions()[0];
 
   for (unsigned int i = 0; i < 4; ++i) {
     if (i == axis) {
-      outputDim[i] = end - start;
+      outputDim.setTensorDim(i, end - start);
     } else {
-      outputDim[i] = in_dim[i];
+      outputDim.setTensorDim(i, in_dim[i]);
     }
   }
 

@@ -6,7 +6,7 @@
  * @date   02 April 2025
  * @see    https://github.com/nnstreamer/nntrainer
  * @author SeungBaek Hong <sb92.hong@samsung.com>
- * @bug    It's not implemented operation yet. Just a draft for compilation.
+ * @bug    No known bugs except for NYI items
  * @brief  This is gather layer class (operation layer)
  */
 
@@ -44,13 +44,59 @@ void GatherLayer::finalize(InitLayerContext &context) {
 
 void GatherLayer::forwarding_operation(const Tensor &input, const Tensor &index,
                                        Tensor &output) {
-  // TODO: implement forwarding operation
-  throw std::runtime_error("forwarding operation is not implemented yet");
+  for (unsigned int b = 0; b < index.getDim().batch(); ++b) {
+    for (unsigned int i = 0; i < index.getDim().channel(); ++i) {
+      for (unsigned int j = 0; j < index.getDim().height(); ++j) {
+        for (unsigned int k = 0; k < index.getDim().width(); ++k) {
+          auto selected = (size_t)index.getValue(b, i, j, k);
+          if (selected >= input.getDim()[axis]) {
+            throw std::invalid_argument("The index value is out of range.");
+          }
+          switch (axis) {
+          case 1:
+            output.setValue(b, i, j, k, input.getValue(b, selected, j, k));
+            break;
+          case 2:
+            output.setValue(b, i, j, k, input.getValue(b, i, selected, k));
+            break;
+          case 3:
+            output.setValue(b, i, j, k, input.getValue(b, i, j, selected));
+          default:
+            break;
+          }
+        }
+      }
+    }
+  }
 }
 
 void GatherLayer::calcDerivative(RunLayerContext &context) {
-  // TODO: implement derivative calculation
-  throw std::runtime_error("derivative calculation is not implemented yet");
+  const Tensor &index = context.getInput(1);
+  const Tensor &inDeriv = context.getIncomingDerivative(SINGLE_INOUT_IDX);
+  Tensor &outDeriv = context.getOutgoingDerivative(SINGLE_INOUT_IDX);
+
+  for (unsigned int b = 0; b < index.getDim().batch(); ++b) {
+    for (unsigned int i = 0; i < index.getDim().channel(); ++i) {
+      for (unsigned int j = 0; j < index.getDim().height(); ++j) {
+        for (unsigned int k = 0; k < index.getDim().width(); ++k) {
+          auto inDerivValue = inDeriv.getValue(b, i, j, k);
+          auto selected = (size_t)index.getValue(b, i, j, k);
+          switch (axis) {
+          case 0:
+            outDeriv.addValue(b, selected, j, k, inDerivValue, 1);
+            break;
+          case 1:
+            outDeriv.addValue(b, i, selected, k, inDerivValue, 1);
+            break;
+          case 2:
+            outDeriv.addValue(b, i, j, selected, inDerivValue, 1);
+          default:
+            break;
+          }
+        }
+      }
+    }
+  }
 }
 
 void GatherLayer::setProperty(const std::vector<std::string> &values) {
