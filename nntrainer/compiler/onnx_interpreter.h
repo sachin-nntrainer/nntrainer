@@ -6,6 +6,7 @@
  * @date   12 February 2025
  * @see    https://github.com/nnstreamer/nntrainer
  * @author SeungBaek Hong <sb92.hong@samsung.com>
+ * @author Sachin Singh <sachin.3@samsung.com>
  * @bug	   No known bugs except for NYI items
  * @brief  This is onnx converter interface for c++ API
  */
@@ -171,6 +172,7 @@ private:
     {"Div", "divide"},
     {"MatMul", "matmul"},
     {"ReduceMean", "reduce_mean"},
+    {"ReduceSum", "reduce_sum"},
     {"Reshape", "reshape"},
     {"Transpose", "permute"},
     {"Cast", "cast"},
@@ -182,6 +184,7 @@ private:
     {"Identity", "identity"},
     {"Unsqueeze", "reshape"},
     {"Gather", "gather"},
+    {"GatherElements", "gather"},
     {"Cosine", "cosine"},
     {"Sine", "sine"},
     {"Tangent", "tangent"},
