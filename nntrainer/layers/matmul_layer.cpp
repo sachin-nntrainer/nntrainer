@@ -24,7 +24,6 @@ namespace nntrainer {
 void MatMulLayer::finalize(InitLayerContext &context) {
   TensorDim inputDim0 = context.getInputDimensions()[0];
   TensorDim inputDim1 = context.getInputDimensions()[1];
-
   if (inputDim0[1] != inputDim1[1]) {
     throw std::invalid_argument("MatMulLayer requires matching channel size. ");
   } else if (inputDim0[3] != inputDim1[2]) {
@@ -40,7 +39,27 @@ void MatMulLayer::finalize(InitLayerContext &context) {
 
 void MatMulLayer::forwarding_operation(const Tensor &input0,
                                        const Tensor &input1, Tensor &output) {
-  input0.dot(input1, output);
+
+  if (input0.channel() != 1) {
+
+    unsigned int batch = input0.batch();
+    unsigned int channel = input0.channel();
+    unsigned int height0 = input0.height();
+    unsigned int width0 = input0.width();
+
+    unsigned int height1 = input1.height();
+    unsigned int width1 = input1.width();
+
+    Tensor input0_ = input0, input1_ = input1;
+
+    input0_.reshape(TensorDim({batch * channel, 1, height0, width0}));
+    input1_.reshape(TensorDim({batch * channel, 1, height1, width1}));
+    output.reshape(TensorDim({batch * channel, 1, height0, width1}));
+
+    input0_.dotBatched(input1_, output);
+    output.reshape(TensorDim({batch, channel, height0, width1}));
+  } else
+    input0.dot(input1, output);
 }
 
 void MatMulLayer::calcDerivative(RunLayerContext &context) {

@@ -99,6 +99,7 @@ public:
   bool support_backwarding;
   unsigned int axis;
   unsigned int start;
+  unsigned int end;
   // TensorDim starts;
 };
 
