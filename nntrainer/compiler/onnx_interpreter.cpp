@@ -6,6 +6,7 @@
  * @date   12 February 2025
  * @see    https://github.com/nnstreamer/nntrainer
  * @author SeungBaek Hong <sb92.hong@samsung.com>
+ * @author Sachin Singh <sachin.3@samsung.com>
  * @bug	   No known bugs except for NYI items
  * @brief  This is onnx converter interface for c++ API
  */
@@ -71,15 +72,24 @@ std::string ONNXInterpreter::extractTensorAttribute(
       oss << prefix << "=";
 
       if (attr.has_t()) {
-        const auto &shape_tensor = attr.t().raw_data();
-        const int64_t *vals =
-          reinterpret_cast<const int64_t *>(shape_tensor.data());
-        int size = shape_tensor.size() / sizeof(int64_t);
+        const auto &raw_tensor = attr.t().raw_data();
+        if (attr.t().data_type() == onnx::TensorProto_DataType_INT64) {
 
-        for (int i = start_offset; i < size; ++i) {
-          oss << vals[i] + alpha;
-          if (i < size - 1)
-            oss << separator;
+          const int64_t *vals =
+            reinterpret_cast<const int64_t *>(raw_tensor.data());
+          int size = raw_tensor.size() / sizeof(int64_t);
+
+          for (int i = start_offset; i < size; ++i) {
+            oss << vals[i] + alpha;
+            if (i < size - 1)
+              oss << separator;
+          }
+
+        } else if (attr.t().data_type() == onnx::TensorProto_DataType_FLOAT) {
+          const float *vals =
+            reinterpret_cast<const float *>(raw_tensor.data());
+          int size = raw_tensor.size() / sizeof(float);
+          oss << *vals;
         }
         return oss.str();
       }
@@ -143,10 +153,19 @@ void ONNXInterpreter::registerNodeHandlers() {
   registerBasicUnaryOp("Relu");
   registerBasicUnaryOp("Identity");
   registerBasicUnaryOp("Gather");
+  registerBasicUnaryOp("GatherElements");
   registerBasicUnaryOp("Cosine");
   registerBasicUnaryOp("Sine");
   registerBasicUnaryOp("Tangent");
   registerBasicUnaryOp("Neg");
+
+  NodeHandlers["Pow"] = [this](const onnx::NodeProto &node,
+                               GraphRepresentation &rep) {
+    std::vector<std::string> props;
+    props.push_back(extractTensorAttribute(constantTensors.at(node.input(1)),
+                                           "value", "exponent"));
+    handleUnaryOp(node, rep, layerKeyMap[node.op_type()], props);
+  };
 
   NodeHandlers["Reshape"] = [this](const onnx::NodeProto &node,
                                    GraphRepresentation &rep) {
@@ -170,6 +189,13 @@ void ONNXInterpreter::registerNodeHandlers() {
                                   GraphRepresentation &rep) {
     std::vector<std::string> props;
     props.push_back(extractAttribute(node, "axis", "axis", "", 1, true, "2"));
+    handleBinaryOp(node, rep, layerKeyMap[node.op_type()], props);
+  };
+
+  NodeHandlers["GatherElements"] = [this](const onnx::NodeProto &node,
+                                          GraphRepresentation &rep) {
+    std::vector<std::string> props;
+    props.push_back("axis=2");
     handleBinaryOp(node, rep, layerKeyMap[node.op_type()], props);
   };
 
@@ -224,6 +250,13 @@ void ONNXInterpreter::registerNodeHandlers() {
                                       GraphRepresentation &rep) {
     std::vector<std::string> props;
     props.push_back(extractAttribute(node, "axes", "axis"));
+    handleUnaryOp(node, rep, layerKeyMap[node.op_type()], props);
+  };
+
+  NodeHandlers["ReduceSum"] = [this](const onnx::NodeProto &node,
+                                     GraphRepresentation &rep) {
+    std::vector<std::string> props;
+    props.push_back("axis=3");
     handleUnaryOp(node, rep, layerKeyMap[node.op_type()], props);
   };
 };
