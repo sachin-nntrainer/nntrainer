@@ -3,54 +3,50 @@ from transformers import AutoTokenizer, Qwen3Config, AutoModelForCausalLM
 from custom_qwen3 import  NNTrainerQwen3ForCausalLM, Qwen3RotaryEmbedding
 import onnx
 import numpy as np
+from transformers.cache_utils import DynamicCache
 
 model_name = "Qwen/Qwen3-1.7B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-
 ####Offical Model####
 
-config = Qwen3Config.from_pretrained(model_name)  
-
-# Fixed maximum length model can handle
-max_len = 256
-config.max_position_embeddings = max_len
-official_model = AutoModelForCausalLM.from_pretrained(model_name,config = config).eval()
-
-#tokens to be generated
-num_tokens_to_generate = 20
+config = Qwen3Config.from_pretrained(model_name,attn_implementation="eager")  
+official_model = AutoModelForCausalLM.from_pretrained(model_name,config=config).eval()
 
 # Prompt
-prompt = "Tell me a dad joke about a computer: "
-print("\nInput prompt: ",prompt)
+prompt = "What is the capital of India ?" 
 
-enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=max_len)
-cur_len = enc.input_ids.size(1)
+messages = [
+    {"role": "user", "content": prompt}
+]
 
-input_ids = torch.full((1, max_len), tokenizer.pad_token_id)  # preallocate with PAD
-input_ids[0, :cur_len] = enc.input_ids[0]
+text = tokenizer.apply_chat_template(
+    messages,
+    tokenize=False,
+    add_generation_prompt=True,
+    enable_thinking=True # Switches between thinking and non-thinking modes. Default is True.
+)
 
+print("\nInput prompt:",prompt)
+
+enc = tokenizer(text, return_tensors="pt")
+input_ids=enc.input_ids
 generated = input_ids.clone()
+    
+output = official_model.generate(
+    input_ids=input_ids,
+    do_sample=False,
+    max_new_tokens=2,
+    use_cache=True,
+)
 
-for step in range(num_tokens_to_generate):  # generate 20 tokens
-
-    outputs = official_model(
-        input_ids=generated
-    )
-
-    next_token_logits = outputs.logits[:, cur_len - 1, :]
-    next_token_id = torch.argmax(next_token_logits, dim=-1)
-
-    generated[0][cur_len] = next_token_id
-    cur_len += 1
-
-decoded = tokenizer.decode(generated[0, :cur_len], skip_special_tokens=True)
-print("\nOfficial Model: ",decoded)
+decoded = tokenizer.decode(output[0], skip_special_tokens=True)
+print("Official model output: ",decoded,"\n")
 
 ####Custom Model####
 
 qwenConfig = official_model.config
-custom_model =  NNTrainerQwen3ForCausalLM(qwenConfig)
+custom_model =  NNTrainerQwen3ForCausalLM(qwenConfig).eval()
 custom_model.load_state_dict(official_model.state_dict(),strict=False)
 
 rotary_emb = Qwen3RotaryEmbedding(qwenConfig)
@@ -58,42 +54,65 @@ rotary_emb = Qwen3RotaryEmbedding(qwenConfig)
 generated = input_ids.clone() # input to official Qwen model
 cur_len =  enc.input_ids.size(1)
 
-position_ids = torch.arange(generated.shape[1]).reshape(1, -1).repeat(generated.shape[0], 1)
+position_ids = torch.arange(cur_len).unsqueeze(0)
 cos, sin = rotary_emb(generated.to(torch.float32), position_ids)
-cos, sin = torch.tensor(cos.numpy()), torch.tensor(sin.numpy())
 variance_epsilon = torch.tensor([[1e-6,]])
 
-cos = cos.reshape(max_len * 128)
-sin = sin.reshape(max_len * 128)
+# Tokens to generate
+num_tokens_to_generate = 2
+causal_mask = torch.full((1, 1, generated.shape[1], generated.shape[1]), float(-3.4028e+38))
+causal_mask = torch.triu(causal_mask, diagonal=1) 
+past_cache = DynamicCache()
+response = []
 
-generated.detach().numpy().astype(np.float32).tofile('./input_tokens.bin')
-cos.detach().numpy().tofile('./rotary_embeddings_cosine.bin')
-sin.detach().numpy().tofile('./rotary_embeddings_sine.bin')
-
-for step in range(num_tokens_to_generate):  # generate 20 tokens
-
-    outputs = custom_model(
-        generated.reshape(max_len,1), 
+outputs = custom_model(
+        generated.transpose(0,1), 
         cos,
         sin,
-        variance_epsilon
+        variance_epsilon,
+        past_cache,
+        causal_mask,
     )
 
-    next_token_logits = outputs[0][:, cur_len - 1, :]
+next_token_logits = outputs[0][:, cur_len - 1, :]
+next_token_id = torch.argmax(next_token_logits,dim=-1)
+response.append(next_token_id.item())
+
+for step in range(num_tokens_to_generate - 1):  
+    
+    past_seen_tokens = past_cache.get_seq_length()
+    position_ids = torch.arange(past_seen_tokens,past_seen_tokens+1).unsqueeze(0)
+    cos, sin = rotary_emb(next_token_id.to(torch.float32), position_ids)
+    
+    attention_mask = torch.zeros((1,past_seen_tokens+1)).to(torch.int64)
+  
+    outputs = custom_model(
+        next_token_id.unsqueeze(1), 
+        cos,
+        sin,
+        variance_epsilon,
+        past_cache,
+        attention_mask,
+    )
+
+    next_token_logits = outputs[0][:,-1, :]
     next_token_id = torch.argmax(next_token_logits,dim=-1)
-    generated[0][cur_len] = next_token_id
-    cur_len += 1
+    if next_token_id == tokenizer.eos_token_id:
+        break
+    response.append(next_token_id.item())
+
+decoded = tokenizer.decode(response, skip_special_tokens=True)
+print("Custom model output: ",decoded)
 
 
-decoded = tokenizer.decode(generated[0, :cur_len], skip_special_tokens=True)
 print("\nCustom Model: ",decoded)
 
 torch.onnx.export(
-    custom_model, (generated.reshape(max_len,1), cos, sin, variance_epsilon),
+    custom_model, (next_token_id.unsqueeze(1), cos, sin, variance_epsilon, past_cache, causal_mask),
     './qwen3_model.onnx',
     export_params=True,
     opset_version=17,
-    input_names=['input', 'cos', 'sin', 'variance_epsilon'],
+    input_names=['input', 'cos', 'sin', 'variance_epsilon', 'past_cache', 'causal_mask'],
     output_names=['output'],
     keep_initializers_as_inputs=False,
     dynamic_axes=None,

@@ -113,7 +113,7 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
     return hidden_states
 
-def self_attention(query,key,value,past_cache,layer_id,scaling,num_key_value_groups):
+def self_attention(query,key,value,past_cache,attention_mask,layer_id,scaling,num_key_value_groups):
     
     if torch.onnx.is_in_onnx_export():
         
@@ -135,11 +135,9 @@ def self_attention(query,key,value,past_cache,layer_id,scaling,num_key_value_gro
     value = repeat_kv(value, num_key_value_groups)
     
     attn_weights = torch.matmul(query, key.transpose(2, 3))*scaling
-       
-    causal_mask = torch.full((1, 1, attn_weights.shape[-2], attn_weights.shape[-1]), float("-inf"))
-    causal_mask = torch.triu(causal_mask, diagonal=1) 
-    attn_weights = attn_weights + causal_mask 
-    
+     
+    attn_weights = attn_weights + attention_mask
+
     attn_weights = nn.functional.softmax(attn_weights, dim=-1)
     attn_output = torch.matmul(attn_weights, value)
     attn_output = attn_output.transpose(1, 2).contiguous()
@@ -179,6 +177,7 @@ class Qwen3Attention(nn.Module):
         sin,
         eps,
         past_cache,
+        attention_mask,
     ):
         _,_,slen,_ = hidden_states.shape
        
@@ -187,11 +186,11 @@ class Qwen3Attention(nn.Module):
          
         query_states = self.q_norm(self.q_proj(hidden_states).view(q_hidden_shape),eps).transpose(1, 2)
         key_states = self.k_norm(self.k_proj(hidden_states).view(kv_hidden_shape),eps).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(kv_hidden_shape).transpose(1, 2)      
-        
+        value_states = self.v_proj(hidden_states).view(kv_hidden_shape).transpose(1, 2)   
+         
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
                 
-        attn_output = self_attention(query_states,key_states,value_states,past_cache,self.layer_idx,self.scaling,self.num_key_value_groups)   
+        attn_output = self_attention(query_states,key_states,value_states,past_cache,attention_mask,self.layer_idx,self.scaling,self.num_key_value_groups)   
         
         attn_output = attn_output.reshape(1, 1, slen,self.config.hidden_size).contiguous()    
         attn_output = self.o_proj(attn_output)
@@ -213,6 +212,7 @@ class Qwen3DecoderLayer(nn.Module):
         sin,
         eps,
         past_cache,
+        attention_mask,
     ):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states,eps)
@@ -223,6 +223,7 @@ class Qwen3DecoderLayer(nn.Module):
             sin,
             eps,
             past_cache,
+            attention_mask,
             )
         hidden_states = residual + hidden_states
 
@@ -253,12 +254,13 @@ class Qwen3Model(PreTrainedModel):
         sin,
         eps,
         past_cache,
+        attention_mask,
     ):
         slen,_ = input_ids.shape
         input_ids = self.broadcast * input_ids
         hidden_states = torch.gather(self.vocab_weights,0,input_ids)
-               
-        for decoder_layer in self.layers[:self.config.num_hidden_layers]:
+              
+        for decoder_layer in self.layers[:1]:
             
             hidden_states = decoder_layer(
                 hidden_states.reshape(1,1,slen,self.config.hidden_size),
@@ -266,6 +268,7 @@ class Qwen3Model(PreTrainedModel):
                 sin,
                 eps,
                 past_cache,
+                attention_mask,
             )  
             
         hidden_states = self.norm(hidden_states,eps)
@@ -286,6 +289,7 @@ class NNTrainerQwen3ForCausalLM(PreTrainedModel):
         sin,
         eps,
         past_cache,
+        attention_mask,
     ):  
         hidden_states = self.model(
             input_ids,
@@ -293,6 +297,7 @@ class NNTrainerQwen3ForCausalLM(PreTrainedModel):
             sin,
             eps,
             past_cache,
+            attention_mask,
         )
 
         logits = self.lm_head(hidden_states)
