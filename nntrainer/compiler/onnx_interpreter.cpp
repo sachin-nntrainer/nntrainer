@@ -4,7 +4,7 @@
  *
  * @file   onnx_interpreter.cpp
  * @date   12 February 2025
- * @see    https://github.com/nnstreamer/nntrainer
+ * @see    https://github.com/nntrainer/nntrainer
  * @author SeungBaek Hong <sb92.hong@samsung.com>
  * @author Sachin Singh <sachin.3@samsung.com>
  * @bug	   No known bugs except for NYI items
