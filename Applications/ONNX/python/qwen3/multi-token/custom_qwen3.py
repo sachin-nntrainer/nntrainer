@@ -117,8 +117,12 @@ def self_attention(query,key,value,past_cache,attention_mask,layer_id,scaling,nu
     
     if torch.onnx.is_in_onnx_export():
         
-        past_k = past_cache.layers[layer_id].key
-        past_v = past_cache.layers[layer_id].value
+        past_k = past_cache[layer_id]["key"]
+        past_v = past_cache[layer_id]["value"]
+        
+        key = repeat_kv(key, num_key_value_groups)
+        value = repeat_kv(value, num_key_value_groups)
+    
         atten_output,present_k,present_v,_ = torch.onnx.ops.attention(
                 query,
                 key,
@@ -127,7 +131,11 @@ def self_attention(query,key,value,past_cache,attention_mask,layer_id,scaling,nu
                 past_k,
                 past_v,
             )
-        return atten_output,present_k,present_v
+        
+        past_cache[layer_id]["key"] = present_k
+        past_cache[layer_id]["value"] = present_v
+        
+        return atten_output,past_cache
     
     key, value = past_cache.update(key, value,layer_id)      
     
@@ -141,7 +149,7 @@ def self_attention(query,key,value,past_cache,attention_mask,layer_id,scaling,nu
     attn_weights = nn.functional.softmax(attn_weights, dim=-1)
     attn_output = torch.matmul(attn_weights, value)
     attn_output = attn_output.transpose(1, 2).contiguous()
-    return attn_output  
+    return attn_output,past_cache  
 class Qwen3Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -190,12 +198,12 @@ class Qwen3Attention(nn.Module):
          
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
                 
-        attn_output = self_attention(query_states,key_states,value_states,past_cache,attention_mask,self.layer_idx,self.scaling,self.num_key_value_groups)   
+        attn_output,past_cache = self_attention(query_states,key_states,value_states,past_cache,attention_mask,self.layer_idx,self.scaling,self.num_key_value_groups)   
         
         attn_output = attn_output.reshape(1, 1, slen,self.config.hidden_size).contiguous()    
         attn_output = self.o_proj(attn_output)
         
-        return attn_output
+        return attn_output,past_cache
 class Qwen3DecoderLayer(nn.Module):
     def __init__(self, config, layer_idx: int):
         super().__init__()
@@ -217,7 +225,7 @@ class Qwen3DecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states,eps)
         # Self Attention
-        hidden_states = self.self_attn(
+        hidden_states,past_cache = self.self_attn(
             hidden_states,
             cos,
             sin,
@@ -232,7 +240,7 @@ class Qwen3DecoderLayer(nn.Module):
         hidden_states = self.post_attention_layernorm(hidden_states,eps)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
-        return hidden_states
+        return hidden_states,past_cache
 
 class Qwen3Model(PreTrainedModel):
     def __init__(self, config):
@@ -260,9 +268,9 @@ class Qwen3Model(PreTrainedModel):
         input_ids = self.broadcast * input_ids
         hidden_states = torch.gather(self.vocab_weights,0,input_ids)
               
-        for decoder_layer in self.layers[:1]:
+        for decoder_layer in self.layers[:self.config.num_hidden_layers]:
             
-            hidden_states = decoder_layer(
+            hidden_states,past_cache = decoder_layer(
                 hidden_states.reshape(1,1,slen,self.config.hidden_size),
                 cos,
                 sin,
@@ -272,7 +280,7 @@ class Qwen3Model(PreTrainedModel):
             )  
             
         hidden_states = self.norm(hidden_states,eps)
-        return hidden_states
+        return hidden_states,past_cache
         
 
 class NNTrainerQwen3ForCausalLM(PreTrainedModel):
@@ -291,7 +299,7 @@ class NNTrainerQwen3ForCausalLM(PreTrainedModel):
         past_cache,
         attention_mask,
     ):  
-        hidden_states = self.model(
+        hidden_states,past_cache = self.model(
             input_ids,
             cos,
             sin,
@@ -302,4 +310,4 @@ class NNTrainerQwen3ForCausalLM(PreTrainedModel):
 
         logits = self.lm_head(hidden_states)
         
-        return logits
+        return logits,past_cache
