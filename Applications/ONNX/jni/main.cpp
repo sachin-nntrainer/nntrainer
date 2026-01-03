@@ -16,34 +16,44 @@
 #include <nntrainer-api-common.h>
 #include <optimizer.h>
 #include <util_func.h>
+#ifdef ENABLE_ONNX_INTERPRETER
+#include <onnx_interpreter.h>
+#include <unordered_map>
+#endif
 
 int main() {
   auto model = ml::train::createModel();
 
-  std::cout << "--------------------------------------Create Model "
-               "Done--------------------------------------"
-            << std::endl;
   try {
-    std::string path = "../../../../Applications/ONNX/jni/simple_model.onnx";
-    model->load(path, ml::train::ModelFormat::MODEL_FORMAT_ONNX);
+    std::string path = "../../../../Applications/ONNX/jni/"
+                       "fcModel/matmul_dynamic.onnx";
+
+    nntrainer::ONNXInterpreter interp;
+
+    // Example user-provided mapping of symbolic dimension names to values.
+    std::unordered_map<std::string, int> dim_map = {{"seq", 7}};
+
+    // This step should be done before 'deserialize'
+    interp.setDimParamMap(dim_map);
+
+    auto graph = interp.deserialize(path);
+
+    // add layers produced by the interpreter into the model
+    for (auto &node : graph) {
+      model->addLayer(node);
+    }
   } catch (const std::exception &e) {
     std::cerr << "Error during load: " << e.what() << "\n";
     return 1;
   }
 
-  std::cout << "--------------------------------------Load Model "
-               "Done--------------------------------------"
-            << std::endl;
   try {
-    model->compile(ml::train::ExecutionMode::INFERENCE);
+    model->compile();
   } catch (const std::exception &e) {
     std::cerr << "Error during compile: " << e.what() << "\n";
     return 1;
   }
 
-  std::cout << "--------------------------------------Compile Model "
-               "Done--------------------------------------"
-            << std::endl;
   try {
     model->initialize();
   } catch (const std::exception &e) {
@@ -51,36 +61,10 @@ int main() {
     return 1;
   }
 
-  std::cout << "--------------------------------------Initialize Model "
-               "Done--------------------------------------"
-            << std::endl;
   model->summarize(std::cout, ML_TRAIN_SUMMARY_MODEL);
 
-  std::cout << "--------------------------------------Summarize Model "
-               "Done--------------------------------------"
-            << std::endl;
+  // NOTE: Havent checked inference but this PR contains weight loading commits.
+  // One can try. Ref: PR #3648
 
-  std::string weight_path = "../../../../Applications/ONNX/jni/bins/";
-  try {
-    model->load(weight_path, ml::train::ModelFormat::MODEL_FORMAT_BIN);
-  } catch (std::exception &e) {
-    std::cerr << "Error during loading weights: " << e.what() << "\n";
-    return 1;
-  }
-
-  float *input1 = new float[4];
-  for (int i = 0; i < 4; i++) {
-    input1[i] = (i + 1);
-  }
-  std::vector<float *> in;
-  in.push_back(input1);
-  auto ans = model->inference(1, in);
-
-  std::cout << "-------------------------------------------Inference "
-               "Done--------------------------------------------"
-            << std::endl;
-  for (auto it : ans) {
-    std::cout << "Ans: " << it[0] << std::endl;
-  }
   return 0;
 }
