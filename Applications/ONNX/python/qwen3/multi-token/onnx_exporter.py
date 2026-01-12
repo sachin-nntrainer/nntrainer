@@ -1,9 +1,21 @@
 import torch
+import argparse
 from transformers import AutoTokenizer, Qwen3Config, AutoModelForCausalLM
 from custom_qwen3 import  NNTrainerQwen3ForCausalLM, Qwen3RotaryEmbedding
 import onnx
 import numpy as np
-from transformers.cache_utils import DynamicCache
+# from transformers.cache_utils import DynamicCache
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='ONNX Exporter for Qwen3')
+parser.add_argument('--seq-len', type=int, default=1, 
+                    help='Sequence length for the model export (>1 for prefill, 1 for decode/generation)')
+parser.add_argument('--model-name', type=str, default='qwen3.onnx',
+                    help='Name of the output ONNX model file')
+args = parser.parse_args()
+
+SEQ_LEN = args.seq_len
+MODEL_NAME = args.model_name
 
 model_name = "Qwen/Qwen3-1.7B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -18,72 +30,106 @@ custom_model =  NNTrainerQwen3ForCausalLM(qwenConfig).eval()
 custom_model.load_state_dict(official_model.state_dict(),strict=False)
 
 head_dim = config.head_dim
-num_layers = config.num_hidden_layers
+num_layers = 1
 
-#Making dummy inputs
-input_ids = torch.rand(256,1)
-cos = torch.rand(1,256,head_dim)
-sin = torch.rand(1,256,head_dim)
-variance_epsilon = torch.tensor([[1e-6,]])
-causal_mask = torch.rand(1,1,1,256)
-# Making dummy inputs for onnx model with dynamic dimensions
-past_cache = {}
-num_layers = 28
+# =========================
+# Dummy input config
+# =========================
+BATCH = 1
+PAST_LEN = 1024
+NUM_HEADS = config.num_attention_heads
+HEAD_DIM = config.head_dim
+VOCAB_SIZE = config.vocab_size
+DTYPE = torch.float32
+DEVICE = "cpu"
 
-# Create sample inputs with concrete dimensions for export
-sample_seq_len = 1
-sample_past_seq_len = 1
-
-for layer_id in range(num_layers):
-    past_cache[layer_id] = {
-        "key": torch.rand(1, 16, sample_past_seq_len, 128),  # (batch=1, heads=16, past_seq, hidden_dim=128)
-        "value": torch.rand(1, 16, sample_past_seq_len, 128),
-    }
-    
-# Prepare input names
-input_names = ['input', 'cos', 'sin', 'variance_epsilon']
-for i in range(num_layers):
-    input_names.append(f'past_cache_{i}_key')
-    input_names.append(f'past_cache_{i}_value')
-input_names.append('causal_mask')    
-
-# Prepare output names
-output_names = ['output']
-for i in range(num_layers):
-    output_names.append(f'present_cache_{i}_key')
-    output_names.append(f'present_cache_{i}_value')
-
-# Define dynamic shapes for ONNX export (batch size is static = 1)
-seq_dim = torch.export.Dim("seq_len")
-past_seq_dim = torch.export.Dim("past_seq_len")
-
-dynamic_shapes = [
-    {0: seq_dim},  # input - [1, seq_len]
-    {1: seq_dim},  # cos - [1, seq_len, hidden_dim]  
-    {1: seq_dim},  # sin - [1, seq_len, hidden_dim]
-    None,  # variance_epsilon - [1, 1]
-    None,
-]
-
-# Add dynamic shapes for past_cache inputs
-# for i in range(num_layers):
-#     dynamic_shapes.append({2: past_seq_dim})  # past_cache_{i}_key - [1, 16, past_seq_len, 128]
-#     dynamic_shapes.append({2: past_seq_dim})  # past_cache_{i}_value - [1, 16, past_seq_len, 128]
-
-# dynamic_shapes.append({2: seq_dim, 3: seq_dim})  # causal_mask - [1, 1, seq_len, seq_len]
-
-# Export with dynamic shapes
-torch.onnx.export(
-    custom_model, 
-    (input_ids, cos, sin, variance_epsilon, past_cache, causal_mask),
-    './qwen3_model.onnx',
-    export_params=True,
-    opset_version=23,
-    input_names=input_names,
-    output_names=output_names,
-    dynamic_shapes=dynamic_shapes,
-    keep_initializers_as_inputs=False,
-    dynamo=True,
+# input_ids
+input_ids = torch.randint(
+    0, VOCAB_SIZE,
+    (BATCH, SEQ_LEN),
+    dtype=torch.long,
+    device=DEVICE
 )
 
-print("<Model exported successfully>")
+# RoPE cos/sin (Qwen/LLaMA style)
+cos = torch.randn(
+    SEQ_LEN, HEAD_DIM,
+    dtype=DTYPE,
+    device=DEVICE
+)
+
+sin = torch.randn(
+    SEQ_LEN, HEAD_DIM,
+    dtype=DTYPE,
+    device=DEVICE
+)
+
+eps=torch.tensor([1e-6],dtype=DTYPE,device=DEVICE) 
+
+# past keys / values 
+past_keys = []
+past_values = []
+
+for _ in range(num_layers):
+    past_keys.append(
+        torch.randn(
+            BATCH, NUM_HEADS, PAST_LEN, HEAD_DIM,
+            dtype=DTYPE,
+            device=DEVICE
+        )
+    )
+    past_values.append(
+        torch.randn(
+            BATCH, NUM_HEADS, PAST_LEN, HEAD_DIM,
+            dtype=DTYPE,
+            device=DEVICE
+        )
+    )
+dummy_inputs = (
+    input_ids.transpose(0,1),
+    cos,
+    sin,
+    eps,
+    past_keys,
+    past_values
+)
+
+input_names = ["input_ids", "cos", "sin","variance_epsilion"]
+
+for i in range(num_layers):
+    input_names.append(f"past_key_{i}")
+
+for i in range(num_layers):
+    input_names.append(f"past_value_{i}")
+
+output_names = ["logits"]
+
+for i in range(num_layers):
+    output_names.append(f"present_key_{i}")
+
+for i in range(num_layers):
+    output_names.append(f"present_value_{i}")
+
+dynamic_axes = {}
+
+for i in range(num_layers):
+    dynamic_axes[f"past_key_{i}"] = { 2: "past_seq"}
+    dynamic_axes[f"past_value_{i}"] = { 2: "past_seq"}
+    dynamic_axes[f"present_key_{i}"] = { 2: "total_seq"}
+    dynamic_axes[f"present_value_{i}"] = { 2: "total_seq"}
+
+torch.onnx.export(
+    custom_model,
+    dummy_inputs,
+    MODEL_NAME,
+    input_names=input_names,
+    output_names=output_names,
+    opset_version=23,
+    keep_initializers_as_inputs=False,
+    export_params=True,
+    dynamic_axes=dynamic_axes,
+    dynamo=False,
+    
+)
+
+print("ONNX export completed successfully")
