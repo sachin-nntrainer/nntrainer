@@ -9,8 +9,6 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 ####Offical Model####
 
 config = Qwen3Config.from_pretrained(model_name,attn_implementation="eager")  
-print(config)
-exit()
 official_model = AutoModelForCausalLM.from_pretrained(model_name,config=config).eval()
 
 # Prompt
@@ -27,6 +25,9 @@ text = tokenizer.apply_chat_template(
     enable_thinking=True # Switches between thinking and non-thinking modes. Default is True.
 )
 
+# Tokens to generate
+num_tokens_to_generate = 300
+
 print("\nInput prompt:",prompt)
 
 enc = tokenizer(text, return_tensors="pt")
@@ -36,7 +37,7 @@ generated = input_ids.clone()
 output = official_model.generate(
     input_ids=input_ids,
     do_sample=False,
-    max_new_tokens=2,
+    max_new_tokens=num_tokens_to_generate,
     use_cache=True,
 )
 
@@ -58,19 +59,19 @@ position_ids = torch.arange(cur_len).unsqueeze(0)
 cos, sin = rotary_emb(generated.to(torch.float32), position_ids)
 variance_epsilon = torch.tensor([[1e-6,]])
 
-# Tokens to generate
-num_tokens_to_generate = 2
 causal_mask = torch.full((1, 1, generated.shape[1], generated.shape[1]), float(-3.4028e+38))
 causal_mask = torch.triu(causal_mask, diagonal=1) 
-past_cache = DynamicCache()
+past_values = [torch.rand(1,8,0,128) for _ in range(qwenConfig.num_hidden_layers)]
+past_keys = [torch.rand(1,8,0,128) for _ in range(qwenConfig.num_hidden_layers)]
 response = []
 
-outputs,_, = custom_model(
+outputs,past_keys,past_values = custom_model(
         generated.transpose(0,1), 
         cos,
         sin,
         variance_epsilon,
-        past_cache,
+        past_keys,
+        past_values,
         causal_mask,
     )
 
@@ -80,18 +81,18 @@ response.append(next_token_id.item())
 
 for step in range(num_tokens_to_generate - 1):  
     
-    past_seen_tokens = past_cache.get_seq_length()
-    position_ids = torch.arange(past_seen_tokens,past_seen_tokens+1).unsqueeze(0)
+    position_ids = torch.arange(cur_len,cur_len+1).unsqueeze(0)
     cos, sin = rotary_emb(next_token_id.to(torch.float32), position_ids)
     
-    attention_mask = torch.zeros((1,past_seen_tokens+1)).to(torch.int64)
+    attention_mask = torch.zeros((1,cur_len+1)).to(torch.int64)
   
-    outputs,_ = custom_model(
+    outputs,past_keys,past_values = custom_model(
         next_token_id.unsqueeze(1), 
         cos,
         sin,
         variance_epsilon,
-        past_cache,
+        past_keys,
+        past_values,
         attention_mask,
     )
 
@@ -100,6 +101,7 @@ for step in range(num_tokens_to_generate - 1):
     if next_token_id == tokenizer.eos_token_id:
         break
     response.append(next_token_id.item())
+    cur_len+=1
 
 decoded = tokenizer.decode(response, skip_special_tokens=True)
 
