@@ -18,7 +18,7 @@
 #include <layer_devel.h>
 #include <layer_node.h>
 
-#ifdef ENABLE_OPENCL
+#if defined(ENABLE_OPENCL) && ENABLE_OPENCL == 1
 #include <cl_context.h>
 #endif
 
@@ -132,7 +132,7 @@ TEST_P(LayerSemantics, setBatchValidateLayerNode_p) {
   }
 }
 
-#ifdef ENABLE_OPENCL
+#if defined(ENABLE_OPENCL) && ENABLE_OPENCL == 1
 TEST_P(LayerSemanticsGpu, createFromClContext_pn) {
   auto &eg = nntrainer::Engine::Global();
   auto cc = static_cast<nntrainer::ClContext *>(eg.getRegisteredContext("gpu"));
