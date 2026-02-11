@@ -439,6 +439,60 @@ public:
    */
   int setDataset(const DatasetModeType &dt,
                  std::shared_ptr<ml::train::Dataset> dataset) override;
+  /**
+   * @brief Get pointers to all trainable weight tensors in the model
+   * @return std::vector<Tensor*> Vector of pointers to weight tensors
+   */
+  // std::vector<Tensor *> getParameterPointers();
+
+  /**
+   * @brief Get pointers to all trainable weight parameters with their sizes
+   * @return std::vector<std::pair<float*, size_t>> Vector of pointers to weight parameters and their sizes
+   */
+  std::vector<std::pair<float *, size_t>> getParameterPointers();
+
+  /**
+   * @brief Perturbs model parameters with a given perturbation vector
+   * @param epsilon Perturbation magnitude
+   * @param z Perturbation vector
+   * @param direction Direction of perturbation (-1, 0, or +1)
+   */
+  void perturbParameters(float epsilon, const std::vector<float> &z, int direction);
+
+  /**
+   * @brief Computes loss using forward pass only (no gradient computation)
+   * @param input Input data pointers
+   * @param label Label data pointers
+   * @return float Computed loss value
+   */
+  float computeLossForwardOnly(const std::vector<float *> &input,
+                              const std::vector<float *> &label);
+
+  /**
+   * @brief Updates model parameters using MeZO algorithm
+   * @param gradient_estimate Estimated gradient vector
+   * @param learning_rate Learning rate for parameter update
+   */
+  void updateParametersMeZO(const std::vector<float> &gradient_estimate,
+                           float learning_rate);
+
+  /**
+   * @brief Trains the model using MeZO (Memory-Efficient Zeroth-Order) optimizer
+   * @param values Training hyperparameters
+   * @param stop_cb Callback function to stop training
+   * @param stop_user_data User data for stop callback
+   * @param epoch_complete_cb Callback function called at epoch completion
+   * @param epoch_user_data User data for epoch completion callback
+   * @return RunStats Training statistics
+   */
+  RunStats trainMeZO(
+    const std::vector<std::string> &values = {},
+    std::function<bool(void *)> stop_cb =
+      [](void *stop_user_data) { return false; },
+    void *stop_user_data = nullptr,
+    std::function<void(void *)> epoch_complete_cb =
+      [](void *epoch_user_data) { return false; },
+    void *epoch_user_data = nullptr);
 
   /**
    * @copydoc void forEachLayer(std::function<void(Layer &,
