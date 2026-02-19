@@ -12,11 +12,7 @@
 
 using LayerHandle = std::shared_ptr<ml::train::Layer>;
 using ModelHandle = std::unique_ptr<ml::train::Model>;
-using DatasetHandle = std::unique_ptr<ml::train::Dataset>;
 
-/**
- * @brief Create a simple neural network for demonstration
- */
 std::vector<LayerHandle> createSimpleGraph() {
   using ml::train::createLayer;
 
@@ -25,85 +21,32 @@ std::vector<LayerHandle> createSimpleGraph() {
   // Input layer
   layers.push_back(
     createLayer("input", {nntrainer::withKey("name", "input0"),
-                          nntrainer::withKey("input_shape", "1:1:10")}));
+                          nntrainer::withKey("input_shape", "1:1:768")}));
 
   // Hidden layer
   layers.push_back(
     createLayer("fully_connected",
-                {nntrainer::withKey("unit", 5),
-                 nntrainer::withKey("activation", "sigmoid")}));
+                {nntrainer::withKey("unit", 256),
+                 nntrainer::withKey("activation", "relu")}));
 
   // Output layer
   layers.push_back(
     createLayer("fully_connected",
-                {nntrainer::withKey("unit", 1),
-                 nntrainer::withKey("activation", "sigmoid")}));
+                {nntrainer::withKey("unit", 128),
+                 nntrainer::withKey("activation", "relu")}));
+   
+   layers.push_back(
+    createLayer("fully_connected",
+                {nntrainer::withKey("unit", 10)}));              
 
   // Loss layer
-  layers.push_back(createLayer("mse"));
+  layers.push_back(createLayer("cross_softmax"));
 
   return layers;
 }
 
-/**
- * @brief Simple data generator for training
- */
-int getSample_train(float **outVec, float **outLabel, bool *last, void *user_data) {
-  static int sample_count = 0;
-  static const int num_samples = 3;
+int main(){
 
-  // Simple XOR-like data
-  static const std::vector<std::vector<float>> inputs = {
-    {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, // 0
-    {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}, // 1
-    {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}, // 0.5
-  };
-
-  static const std::vector<std::vector<float>> labels = {
-    {0.0f}, // label for 0
-    {1.0f}, // label for 1
-    {0.5f}, // label for 0.5
-  };
-
-  if (sample_count >= num_samples) {
-    *last = true;
-    sample_count = 0;
-    return 0;
-  }
-
-  // Copy input data
-  for (size_t i = 0; i < inputs[sample_count].size(); ++i) {
-    (*outVec)[i] = inputs[sample_count][i];
-  }
-
-  // Copy label data
-  for (size_t i = 0; i < labels[sample_count].size(); ++i) {
-    (*outLabel)[i] = labels[sample_count][i];
-  }
-
-  sample_count++;
-  *last = false;
-
-  return 0;
-}
-
-/**
- * @brief Create a simple dataset for training
- */
-DatasetHandle createSimpleDataset() {
-  auto dataset = ml::train::createDataset(ml::train::DatasetType::GENERATOR, getSample_train);
-
-  // Set dataset properties
-  dataset->setProperty({
-    "buffer_size=3",
-    "input_shape=1:1:10",
-    "label_shape=1:1:1"
-  });
-
-  return dataset;
-}
-
-int main() {
     std::cout << "Demonstrating trainMeZO with a simple neural network" << std::endl;
 
     // Create model
@@ -114,14 +57,6 @@ int main() {
     for (auto &layer : layers) {
         model->addLayer(layer);
     }
-
-    // Set optimizer to MeZO (though trainMeZO doesn't use it directly)
-    auto optimizer = ml::train::createOptimizer("mezo");
-    model->setOptimizer(optimizer);
-
-    // Add dataset
-    auto dataset = createSimpleDataset();
-    model->setDataset(ml::train::DatasetModeType::MODE_TRAIN, dataset);
 
     try {
         // Compile the model
@@ -141,59 +76,203 @@ int main() {
         return 1;
     }
 
-    // Cast to NeuralNetwork to access trainMeZO
+    model->summarize(std::cout, ML_TRAIN_SUMMARY_MODEL);
+
     auto nn = static_cast<nntrainer::NeuralNetwork*>(model.get());
+
+    float *input = new float[768];
+
+    for(int i=0;i<768;i++)
+     input[i]=i;
+
+    float *output=model->inference(1, {input})[0];
+
+    for(int i=0;i<10;i++)
+      std::cout<<output[i]<<" ";
+    
+    std::cout<<std::endl;  
 
     // Get parameter pointers before training
     std::vector<nntrainer::Tensor*> params = nn->getParameterPointers();
     std::cout << "Number of weight tensors before training: " << params.size() << std::endl;
 
-    // Print initial weights
-    if (!params.empty()) {
-        const auto& first_tensor = *params[0];
-        if (first_tensor.getDataType() == nntrainer::Tdatatype::FP32) {
-            float* data = reinterpret_cast<float*>(first_tensor.getData());
-            if (first_tensor.size() > 0) {
-                std::cout << "Initial first weight value: " << data[0] << std::endl;
-            }
-        }
+    for(auto *t:params){
+      std::cout<<t->getName()<<" "<<" "<<std::endl;
+      int size = t->getDim().getDataLen();
+      float* val = (float*)(t->getData());
+
+      std::cout<<val[0]<<" ";
+      val[0]=5;
+      std::cout<<val[0]<<" ";
+      float* val1 = (float*)(t->getData());
+      std::cout<<val1[0]<<" ";
+
+      std::cout<<std::endl;
     }
 
-    // Train with MeZO
-    try {
-        std::cout << "Starting MeZO training..." << std::endl;
-        auto stats = nn->trainMeZO({
-            "epochs=5",
-            "batch_size=1",
-            "learning_rate=0.1",
-            "mezo_epsilon=0.01"
-        });
-        std::cout << "MeZO training completed successfully!" << std::endl;
-        std::cout << "Training stats: epochs=" << stats.max_epoch << std::endl;
-    } catch (const std::exception &e) {
-        std::cerr << "Error during MeZO training: " << e.what() << std::endl;
-        return 1;
-    }
-
-    // Get parameter pointers after training
-    params = nn->getParameterPointers();
-    std::cout << "Number of weight tensors after training: " << params.size() << std::endl;
-
-    // Print weights after training
-    if (!params.empty()) {
-        const auto& first_tensor = *params[0];
-        if (first_tensor.getDataType() == nntrainer::Tdatatype::FP32) {
-            float* data = reinterpret_cast<float*>(first_tensor.getData());
-            if (first_tensor.size() > 0) {
-                std::cout << "Final first weight value: " << data[0] << std::endl;
-            }
-        }
-    }
-
-    std::cout << "trainMeZO demonstration completed!" << std::endl;
+    output=model->inference(1, {input})[0];
 
     return 0;
 }
+
+// using LayerHandle = std::shared_ptr<ml::train::Layer>;
+// using ModelHandle = std::unique_ptr<ml::train::Model>;
+// using DatasetHandle = std::unique_ptr<ml::train::Dataset>;
+
+// /**
+//  * @brief Create a simple neural network for demonstration
+//  */
+
+
+// /**
+//  * @brief Simple data generator for training
+//  */
+// int getSample_train(float **outVec, float **outLabel, bool *last, void *user_data) {
+//   static int sample_count = 0;
+//   static const int num_samples = 3;
+
+//   // Simple XOR-like data
+//   static const std::vector<std::vector<float>> inputs = {
+//     {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, // 0
+//     {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}, // 1
+//     {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}, // 0.5
+//   };
+
+//   static const std::vector<std::vector<float>> labels = {
+//     {0.0f}, // label for 0
+//     {1.0f}, // label for 1
+//     {0.5f}, // label for 0.5
+//   };
+
+//   if (sample_count >= num_samples) {
+//     *last = true;
+//     sample_count = 0;
+//     return 0;
+//   }
+
+//   // Copy input data
+//   for (size_t i = 0; i < inputs[sample_count].size(); ++i) {
+//     (*outVec)[i] = inputs[sample_count][i];
+//   }
+
+//   // Copy label data
+//   for (size_t i = 0; i < labels[sample_count].size(); ++i) {
+//     (*outLabel)[i] = labels[sample_count][i];
+//   }
+
+//   sample_count++;
+//   *last = false;
+
+//   return 0;
+// }
+
+// /**
+//  * @brief Create a simple dataset for training
+//  */
+// DatasetHandle createSimpleDataset() {
+//   auto dataset = ml::train::createDataset(ml::train::DatasetType::GENERATOR, getSample_train);
+
+//   // Set dataset properties
+//   dataset->setProperty({
+//     "buffer_size=3",
+//     "input_shape=1:1:10",
+//     "label_shape=1:1:1"
+//   });
+
+//   return dataset;
+// }
+
+// int main() {
+//     std::cout << "Demonstrating trainMeZO with a simple neural network" << std::endl;
+
+//     // Create model
+//     auto model = ml::train::createModel();
+
+//     // Add layers
+//     auto layers = createSimpleGraph();
+//     for (auto &layer : layers) {
+//         model->addLayer(layer);
+//     }
+
+//     // Set optimizer to MeZO (though trainMeZO doesn't use it directly)
+//     auto optimizer = ml::train::createOptimizer("mezo");
+//     model->setOptimizer(optimizer);
+
+//     // Add dataset
+//     auto dataset = createSimpleDataset();
+//     model->setDataset(ml::train::DatasetModeType::MODE_TRAIN, dataset);
+
+//     try {
+//         // Compile the model
+//         model->compile();
+//         std::cout << "Model compiled successfully." << std::endl;
+//     } catch (const std::exception &e) {
+//         std::cerr << "Error compiling model: " << e.what() << std::endl;
+//         return 1;
+//     }
+
+//     try {
+//         // Initialize the model
+//         model->initialize();
+//         std::cout << "Model initialized successfully." << std::endl;
+//     } catch (const std::exception &e) {
+//         std::cerr << "Error initializing model: " << e.what() << std::endl;
+//         return 1;
+//     }
+
+//     // Cast to NeuralNetwork to access trainMeZO
+//     auto nn = static_cast<nntrainer::NeuralNetwork*>(model.get());
+
+//     // Get parameter pointers before training
+//     std::vector<nntrainer::Tensor*> params = nn->getParameterPointers();
+//     std::cout << "Number of weight tensors before training: " << params.size() << std::endl;
+
+//     // Print initial weights
+//     if (!params.empty()) {
+//         const auto& first_tensor = *params[0];
+//         if (first_tensor.getDataType() == nntrainer::Tdatatype::FP32) {
+//             float* data = reinterpret_cast<float*>(first_tensor.getData());
+//             if (first_tensor.size() > 0) {
+//                 std::cout << "Initial first weight value: " << data[0] << std::endl;
+//             }
+//         }
+//     }
+
+//     // Train with MeZO
+//     try {
+//         std::cout << "Starting MeZO training..." << std::endl;
+//         auto stats = nn->trainMeZO({
+//             "epochs=5",
+//             "batch_size=1",
+//             "learning_rate=0.1",
+//             "mezo_epsilon=0.01"
+//         });
+//         std::cout << "MeZO training completed successfully!" << std::endl;
+//         std::cout << "Training stats: epochs=" << stats.max_epoch << std::endl;
+//     } catch (const std::exception &e) {
+//         std::cerr << "Error during MeZO training: " << e.what() << std::endl;
+//         return 1;
+//     }
+
+//     // Get parameter pointers after training
+//     params = nn->getParameterPointers();
+//     std::cout << "Number of weight tensors after training: " << params.size() << std::endl;
+
+//     // Print weights after training
+//     if (!params.empty()) {
+//         const auto& first_tensor = *params[0];
+//         if (first_tensor.getDataType() == nntrainer::Tdatatype::FP32) {
+//             float* data = reinterpret_cast<float*>(first_tensor.getData());
+//             if (first_tensor.size() > 0) {
+//                 std::cout << "Final first weight value: " << data[0] << std::endl;
+//             }
+//         }
+//     }
+
+//     std::cout << "trainMeZO demonstration completed!" << std::endl;
+
+//     return 0;
+// }
 // #include <iostream>
 // #include <vector>
 // #include <memory>

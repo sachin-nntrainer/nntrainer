@@ -1856,40 +1856,41 @@ void NeuralNetwork::forEachLayer(
   };
 }
 
-// std::vector<Tensor *> NeuralNetwork::getParameterPointers() {
-//   std::vector<Tensor *> params;
-//   forEachLayer(
-//     [&params](ml::train::Layer &layer, RunLayerContext &rc, void *user_data) {
-//       LayerNode &ln = static_cast<LayerNode &>(layer);
-//       for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
-//         params.push_back(&ln.getWeight(i));
-//       }
-//     },
-//     nullptr);
-//   return params;
-// }
-
-std::vector<std::pair<float *, size_t>> NeuralNetwork::getParameterPointers() {
-  std::vector<std::pair<float *, size_t>> params;
-
-  // Iterate through all layers and collect parameter pointers
-  forEachLayer([&](ml::train::Layer &layer, RunLayerContext &context, void *) {
-    std::vector<float *> weights;
-    std::vector<TensorDim> dims;
-    layer.getWeights(weights, dims);
-
-    for (size_t i = 0; i < weights.size(); ++i) {
-      if (weights[i] != nullptr) {
-        size_t size = dims[i].getDataLen();
-        params.emplace_back(weights[i], size);
+std::vector<nntrainer::Tensor *> NeuralNetwork::getParameterPointers() {
+  std::vector<nntrainer::Tensor *> params;
+  forEachLayer(
+    [&params](ml::train::Layer &layer, RunLayerContext &rc, void *user_data) {
+      LayerNode &ln = static_cast<LayerNode &>(layer);
+      for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
+        params.push_back(&ln.getWeight(i));
       }
-    }
-  }, nullptr);
-
+    },
+    nullptr);
   return params;
 }
 
+// std::vector<std::pair<float *, size_t>> NeuralNetwork::getParameterPointers() {
+//   std::vector<std::pair<float *, size_t>> params;
+
+//   // Iterate through all layers and collect parameter pointers
+//   forEachLayer([&](ml::train::Layer &layer, RunLayerContext &context, void *) {
+//     std::vector<float *> weights;
+//     std::vector<TensorDim> dims;
+//     layer.getWeights(weights, dims);
+
+//     for (size_t i = 0; i < weights.size(); ++i) {
+//       if (weights[i] != nullptr) {
+//         size_t size = dims[i].getDataLen();
+//         params.emplace_back(weights[i], size);
+//       }
+//     }
+//   }, nullptr);
+
+//   return params;
+// }
+
 RunStats NeuralNetwork::trainMeZO(
+  const std::pair<std::vector<float>,std::vector<float>> &dataset,
   const std::vector<std::string> &values,
   std::function<bool(void *)> stop_cb,
   void *stop_user_data,
@@ -1928,8 +1929,8 @@ RunStats NeuralNetwork::trainMeZO(
   // Get parameter pointers for MeZO
   auto param_ptrs = getParameterPointers();
   size_t total_params = 0;
-  for (const auto &p : param_ptrs) {
-    total_params += p.second;
+  for (auto *p : param_ptrs) {
+    total_params += p->getDim().getDataLen();
   }
 
   // Initialize random number generator for MeZO perturbations
@@ -1940,12 +1941,12 @@ RunStats NeuralNetwork::trainMeZO(
   stats.max_epoch = epochs;
 
   // Get training dataset
-  auto dataset = setDataset(DatasetModeType::MODE_TRAIN);
-  if (!dataset) {
-    throw std::runtime_error("No training dataset provided");
-  }
+  //auto dataset = setDataset(DatasetModeType::MODE_TRAIN);
+  // if (dataset == {}) {
+  //   throw std::runtime_error("No training dataset provided");
+  // }
 
-  dataset->setProperty({"batch_size=" + std::to_string(batch_size)});
+  //dataset->setProperty({"batch_size=" + std::to_string(batch_size)});
 
   ml_logi("Starting MeZO training with %zu parameters, epsilon=%.6f",
           total_params, mezo_epsilon);
@@ -1956,14 +1957,13 @@ RunStats NeuralNetwork::trainMeZO(
     unsigned int batch_count = 0;
 
     // Reset dataset for new epoch
-    dataset->setProperty({"buffer_size=1"});
+    //dataset->setProperty({"buffer_size=1"});
 
     while (true) {
       // Get batch data
-      std::vector<float *> inputs, labels;
-      if (dataset->getBatch(inputs, labels) != ML_ERROR_NONE) {
-        break;  // End of epoch
-      }
+      std::vector<float> inputs, labels;
+      inputs = dataset.first;
+      labels = dataset.second;
 
       // Generate random perturbation vector z
       std::vector<float> z(total_params);
@@ -1998,7 +1998,7 @@ RunStats NeuralNetwork::trainMeZO(
       batch_count++;
 
       // Free batch data
-      dataset->freeBatch(inputs, labels);
+      //dataset->freeBatch(inputs, labels);
 
       // Check stop condition
       if (stop_cb(stop_user_data)) {
@@ -2025,39 +2025,20 @@ RunStats NeuralNetwork::trainMeZO(
   return stats;
 }
 
-std::vector<std::pair<float *, size_t>> NeuralNetwork::getParameterPointers() {
-  std::vector<std::pair<float *, size_t>> params;
-
-  // Iterate through all layers and collect parameter pointers
-  forEachLayer([&](Layer &layer, RunLayerContext &context, void *) {
-    std::vector<float *> weights;
-    std::vector<TensorDim> dims;
-    layer.getWeights(weights, dims);
-
-    for (size_t i = 0; i < weights.size(); ++i) {
-      if (weights[i] != nullptr) {
-        size_t size = dims[i].getDataLen();
-        params.emplace_back(weights[i], size);
-      }
-    }
-  }, nullptr);
-
-  return params;
-}
-
 void NeuralNetwork::perturbParameters(float epsilon, const std::vector<float> &z, int direction) {
   auto param_ptrs = getParameterPointers();
   size_t idx = 0;
 
-  for (const auto &[ptr, size] : param_ptrs) {
-    for (size_t i = 0; i < size; ++i) {
+  for (const auto *ptr : param_ptrs) {
+    float *data = (float*)(ptr->getData());
+    for (size_t i = 0; i < ptr->getDim().getDataLen(); ++i) {
       // Apply perturbation based on direction:
       // +1: add ε·z (for positive perturbation)
       // -1: subtract ε·z (for negative perturbation)
       //  0: no change (used as placeholder)
-      ptr[i] += direction * epsilon * z[idx + i];
+      data[i] += direction * epsilon * z[idx + i];
     }
-    idx += size;
+    //idx += size;
   }
 }
 
@@ -2103,14 +2084,15 @@ void NeuralNetwork::updateParametersMeZO(const std::vector<float> &gradient_esti
   auto param_ptrs = getParameterPointers();
   size_t idx = 0;
 
-  for (const auto &[ptr, size] : param_ptrs) {
-    for (size_t i = 0; i < size; ++i) {
+  for (const auto *ptr : param_ptrs) {
+    float *data = (float*)(ptr->getData());
+    for (size_t i = 0; i < ptr->getDim().getDataLen(); ++i) {
       // Gradient descent update: θ = θ - η * g
-      ptr[i] -= learning_rate * gradient_estimate[idx + i];
+      data -= learning_rate * gradient_estimate[idx + i];
     }
-    idx += size;
   }
 }
+  
 
 
 void NeuralNetwork::exports(const ml::train::ExportMethods &method,

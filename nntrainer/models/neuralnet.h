@@ -449,7 +449,7 @@ public:
    * @brief Get pointers to all trainable weight parameters with their sizes
    * @return std::vector<std::pair<float*, size_t>> Vector of pointers to weight parameters and their sizes
    */
-  std::vector<std::pair<float *, size_t>> getParameterPointers();
+  std::vector<nntrainer::Tensor *> getParameterPointers();
 
   /**
    * @brief Perturbs model parameters with a given perturbation vector
@@ -486,6 +486,7 @@ public:
    * @return RunStats Training statistics
    */
   RunStats trainMeZO(
+    const std::pair<std::vector<float>,std::vector<float>> &dataset, //TODO: MNIST specific handling of dataset for POC purpose 
     const std::vector<std::string> &values = {},
     std::function<bool(void *)> stop_cb =
       [](void *stop_user_data) { return false; },
