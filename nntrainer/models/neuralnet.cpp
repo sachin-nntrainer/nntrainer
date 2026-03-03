@@ -1973,62 +1973,39 @@ RunStats NeuralNetwork::trainMeZO(const std::vector<unsigned int> &batch_sizes,
     }
   }
 
-  // Get parameter pointers for MeZO
-  auto param_ptrs = getParameterPointers();
-  size_t total_params = 0;
-  for (auto *p : param_ptrs) {
-    total_params += p->getDim().getDataLen();
-  }
-
-  // Initialize random number generator for MeZO perturbations
-  std::mt19937 gen(42);
-  std::normal_distribution<float> normal_dist(0.0f, 1.0f);
-
   RunStats stats;
   stats.max_epoch = epochs;
-
-  ml_logi("Starting MeZO training with %zu parameters, epsilon=%.6f",
-          total_params, mezo_epsilon);
 
   for (unsigned int epoch = 0; epoch < epochs; ++epoch) {
     stats.epoch_idx = epoch;
     float epoch_loss = 0.0f;
     unsigned int batch_count = 0;
+    int seed = 42 + epoch;
 
     for (size_t b = 0; b < inputs.size(); ++b) {
       unsigned int cur_batch_size = batch_sizes[b];
       std::vector<float *> input_batch = {inputs[b]};
       std::vector<float *> label_batch = {labels[b]};
 
-      // Generate random perturbation vector z
-      std::vector<float> z(total_params);
-      for (size_t i = 0; i < total_params; ++i) {
-        z[i] = normal_dist(gen);
-      }
-
       // MeZO algorithm: estimate gradient using finite differences
       // 1. Compute L(θ+ε·z) with positive perturbation
-      perturbParameters(mezo_epsilon, z, +1);
+      perturbParameters(mezo_epsilon, seed);
       float loss_plus =
         computeLossForwardOnly(cur_batch_size, input_batch, label_batch);
 
       // 2. Compute L(θ-ε·z) with negative perturbation
-      perturbParameters(mezo_epsilon, z, -2);
+      perturbParameters(-2 * mezo_epsilon, seed);
       float loss_minus =
         computeLossForwardOnly(cur_batch_size, input_batch, label_batch);
 
       // 3. Restore original parameters
-      perturbParameters(mezo_epsilon, z, +1);
+      perturbParameters(mezo_epsilon, seed);
 
       // 4. Estimate gradient: g ≈ (L(θ+) - L(θ-)) / (2ε) · z
-      float diff = (loss_plus - loss_minus) / (2.0f * mezo_epsilon);
-      std::vector<float> gradient_estimate(total_params);
-      for (size_t i = 0; i < total_params; ++i) {
-        gradient_estimate[i] = diff * z[i];
-      }
+      float projected_grad = (loss_plus - loss_minus) / (2.0f * mezo_epsilon);
 
       // 5. Update parameters: θ = θ - η · g
-      updateParametersMeZO(gradient_estimate, learning_rate);
+      updateParametersMeZO(projected_grad, learning_rate, seed);
 
       epoch_loss += (loss_plus + loss_minus) / 2.0f;
       batch_count++;
@@ -2055,18 +2032,21 @@ std::vector<nntrainer::Tensor *> NeuralNetwork::getParameterPointers() {
   forEachLayer(
     [&](ml::train::Layer &layer, RunLayerContext &rc, void *user_data) {
       LayerNode &ln = static_cast<LayerNode &>(layer);
-      for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
-        params.push_back(&ln.getWeight(i));
+      // Only include parameters from trainable layers
+      if (ln.getTrainable()) {
+        for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
+          params.push_back(&ln.getWeight(i));
+        }
       }
     },
     nullptr);
   return params;
 }
 
-void NeuralNetwork::perturbParameters(float epsilon,
-                                      const std::vector<float> &z,
-                                      int direction) {
+void NeuralNetwork::perturbParameters(float epsilon, int seed) {
   auto param_ptrs = getParameterPointers();
+  std::mt19937 gen(seed);
+  std::normal_distribution<float> normal_dist(0.0f, 1.0f);
   size_t idx = 0;
 
   for (const auto *ptr : param_ptrs) {
@@ -2078,7 +2058,7 @@ void NeuralNetwork::perturbParameters(float epsilon,
       // -1: subtract ε·z (for negative perturbation)
       // -2: subtract 2ε·z (to go from θ+ε·z to θ-ε·z)
 
-      data[i] += direction * epsilon * z[idx + i];
+      data[i] += epsilon * normal_dist(gen);
     }
     idx += param_size;
   }
@@ -2132,9 +2112,11 @@ float NeuralNetwork::computeLossForwardOnly(unsigned int batch_size,
   return total_loss / static_cast<float>(batch_size);
 }
 
-void NeuralNetwork::updateParametersMeZO(
-  const std::vector<float> &gradient_estimate, float learning_rate) {
+void NeuralNetwork::updateParametersMeZO(float projected_grad,
+                                         float learning_rate, int seed) {
   auto param_ptrs = getParameterPointers();
+  std::mt19937 gen(seed);
+  std::normal_distribution<float> normal_dist(0.0f, 1.0f);
   size_t idx = 0;
 
   for (const auto *ptr : param_ptrs) {
@@ -2143,7 +2125,7 @@ void NeuralNetwork::updateParametersMeZO(
     for (size_t i = 0; i < param_size; ++i) {
       // Gradient descent update: θ = θ - η * g
 
-      data[i] -= learning_rate * gradient_estimate[idx + i];
+      data[i] -= learning_rate * projected_grad * normal_dist(gen);
     }
     idx += param_size;
   }

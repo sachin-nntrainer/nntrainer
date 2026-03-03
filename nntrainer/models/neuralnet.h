@@ -447,14 +447,8 @@ public:
    */
   std::vector<nntrainer::Tensor *> getParameterPointers();
 
-  /**
-   * @brief Perturbs model parameters with a given perturbation vector
-   * @param epsilon Perturbation magnitude
-   * @param z Perturbation vector
-   * @param direction Direction of perturbation (-1, 0, or +1)
-   */
-  void perturbParameters(float epsilon, const std::vector<float> &z,
-                         int direction);
+  
+  void perturbParameters(float epsilon, int seed);
 
   /**
    * @brief Computes loss using forward pass only (no gradient computation)
@@ -466,13 +460,9 @@ public:
                                std::vector<float *> &inputs,
                                std::vector<float *> &labels);
 
-  /**
-   * @brief Updates model parameters using MeZO algorithm
-   * @param gradient_estimate Estimated gradient vector
-   * @param learning_rate Learning rate for parameter update
-   */
-  void updateParametersMeZO(const std::vector<float> &gradient_estimate,
-                            float learning_rate);
+  
+  void updateParametersMeZO(float projected_grad, float learning_rate,
+                            int seed);
 
   /**
    * @brief Trains the model using MeZO (Memory-Efficient Zeroth-Order)
