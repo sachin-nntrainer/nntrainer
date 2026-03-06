@@ -6,6 +6,7 @@ import torchvision.transforms as transforms
 from tqdm import tqdm
 import random
 import numpy as np
+import os
 
 def set_global_seed(seed=42):
     random.seed(seed)
@@ -14,14 +15,35 @@ def set_global_seed(seed=42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+def export_model_to_onnx(model, device, filepath):
+    """Export the trained model to ONNX format"""
+    model.eval()
+    
+    # Create dummy input for tracing (same shape as MNIST images)
+    dummy_input = torch.randn(1,784).to(device)
+    
+    # Export the model
+    torch.onnx.export(
+        model,                          # model being run
+        dummy_input,                    # model input (or a tuple for multiple inputs)
+        filepath,                       # where to save the model
+        export_params=True,             # store the trained parameter weights inside the model file
+        opset_version=17,               # the ONNX version to export the model to
+        do_constant_folding=True,       # whether to execute constant folding for optimization
+        input_names=['input'],          # the model's input names
+        output_names=['output'],        # the model's output names
+        keep_initializers_as_inputs=False,  # do not add initializers as inputs
+        dynamic_axes=None               # no dynamic axes
+    )
+    
+    print(f"Model exported to {filepath}")
 class MNIST_MLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(784, 256),
+            nn.Linear(784, 256,bias=False),
             nn.ReLU(),
-            nn.Linear(256, 10)
+            nn.Linear(256, 10,bias=False)
         )
 
     def forward(self, x):
@@ -42,12 +64,14 @@ class MeZO:
         for p in self.model.parameters():
             # Generate z ~ N(0, 1) for each parameter
             z = torch.randn_like(p)
+            #print(z)
             p.add_(z, alpha=scale)
 
     @torch.no_grad()
     def step(self, x, y, criterion):
         # 1. Sample random seed s for this timestep t
         current_s = self.base_seed + self.t
+        x = x.view(x.shape[0],-1)
 
         # 2. θ ← PerturbParameters(θ, ϵ, s)
         self._perturb_parameters(current_s, self.epsilon)
@@ -92,6 +116,10 @@ def run_training():
                              batch_size=BATCH_SIZE)
 
     model = MNIST_MLP().to(DEVICE)
+    # Export model to ONNX format
+    export_model_to_onnx(model, DEVICE, "mezo_mnist_model.onnx")
+    #exit()
+    
     optimizer = MeZO(model, lr=LR, epsilon=EPSILON, base_seed=42)
     criterion = nn.CrossEntropyLoss()
 
@@ -111,9 +139,12 @@ def run_training():
         with torch.no_grad():
             for x, y in test_loader:
                 x, y = x.to(DEVICE), y.to(DEVICE)
+                x = x.view(x.shape[0],-1)
                 correct += (model(x).argmax(1) == y).sum().item()
         
-        print(f"End Epoch {epoch+1} | Accuracy: {100 * correct / 10000:.2f}%")
-
+        # Print average loss for the epoch
+        avg_loss = total_loss / len(train_loader)
+        print(f"End Epoch {epoch+1} | Average Loss: {avg_loss:.4f} | Accuracy: {100 * correct / 10000:.2f}%")
+    
 if __name__ == "__main__":
     run_training()

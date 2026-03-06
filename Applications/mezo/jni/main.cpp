@@ -113,11 +113,20 @@ int main(int argc, char **argv) {
 
   auto model = ml::train::createModel();
 
-  // Add layers
+  //Add layers
   auto layers = createSimpleGraph();
   for (auto &layer : layers) {
     model->addLayer(layer);
   }
+
+  // try {
+  //   std::string path = "/sachin/clone_out/nntrainer/Applications/mezo/python/mezo_mnist_model.onnx";
+  //   std::cout<<path;
+  //   model->load(path, ml::train::ModelFormat::MODEL_FORMAT_ONNX);
+  // } catch (const std::exception &e) {
+  //   std::cerr << "Error during load: " << e.what() << "\n";
+  //   return 1;
+  // }
 
   try {
     // Compile the model
@@ -137,6 +146,15 @@ int main(int argc, char **argv) {
   }
 
   model->summarize(std::cout, ML_TRAIN_SUMMARY_MODEL);
+
+  // std::string weight_path = "/sachin/clone_out/nntrainer/Applications/mezo/python/bins/";
+  // try {
+  //   model->load(weight_path, ml::train::ModelFormat::MODEL_FORMAT_BIN);
+  //    std::cout << "Model weights loaded successfully. " << std::endl;
+  // } catch (std::exception &e) {
+  //   std::cerr << "Error during loading weights: " << e.what() << "\n";
+  //   return 1;
+  // }
 
   size_t feature_len = 784;
   size_t label_len = 1; // Class indices instead of one-hot encoding

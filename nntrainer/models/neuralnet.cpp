@@ -1954,6 +1954,7 @@ RunStats NeuralNetwork::trainMeZO(const std::vector<unsigned int> &batch_sizes,
   if (batch_sizes.empty() || batch_sizes.size() != inputs.size()) {
     throw std::runtime_error("batch_sizes must have the same size as inputs");
   }
+  
 
   // Parse training properties
   unsigned int epochs = 1;
@@ -1975,6 +1976,28 @@ RunStats NeuralNetwork::trainMeZO(const std::vector<unsigned int> &batch_sizes,
 
   RunStats stats;
   stats.max_epoch = epochs;
+  //auto param_ptrs = getParameterPointers();
+  size_t idx = 0;
+  // std::mt19937 gen1(434);
+  // std::normal_distribution<float> normal_dist(0.0f, 1.0f);
+
+  // for (const auto *ptr : param_ptrs) {
+  //   float *data = (float *)(ptr->getData());
+  //   size_t param_size = ptr->getDim().getDataLen();
+  //   for (size_t i = 0; i < param_size; ++i) {
+  //     // Apply perturbation based on direction:
+  //     // +1: add ε·z (for positive perturbation)
+  //     // -1: subtract ε·z (for negative perturbation)
+  //     // -2: subtract 2ε·z (to go from θ+ε·z to θ-ε·z)
+  //     //if(i<5)
+  //     //std::cout<<normal_dist(gen)<<" ";
+      
+  //     //std::cout<<normal_dist(gen1);
+  //     std::cout<<data[i]<<" ";
+      
+  //   }
+  //   idx += param_size;
+  // }
 
   for (unsigned int epoch = 0; epoch < epochs; ++epoch) {
     stats.epoch_idx = epoch;
@@ -2057,11 +2080,13 @@ void NeuralNetwork::perturbParameters(float epsilon, int seed) {
       // +1: add ε·z (for positive perturbation)
       // -1: subtract ε·z (for negative perturbation)
       // -2: subtract 2ε·z (to go from θ+ε·z to θ-ε·z)
-
+      //if(i<5)
+      //std::cout<<normal_dist(gen)<<" ";
       data[i] += epsilon * normal_dist(gen);
     }
     idx += param_size;
   }
+  //std::cout<<std::endl<<"Done"<<std::endl;
 }
 
 float NeuralNetwork::computeLossForwardOnly(unsigned int batch_size,
@@ -2124,11 +2149,13 @@ void NeuralNetwork::updateParametersMeZO(float projected_grad,
     size_t param_size = ptr->getDim().getDataLen();
     for (size_t i = 0; i < param_size; ++i) {
       // Gradient descent update: θ = θ - η * g
-
+       //if(i<5)
+      //std::cout<<normal_dist(gen)<<" "; 
       data[i] -= learning_rate * projected_grad * normal_dist(gen);
     }
     idx += param_size;
   }
+  //std::cout<<std::endl<<"Done1"<<std::endl;
 }
 
 void NeuralNetwork::exports(const ml::train::ExportMethods &method,
