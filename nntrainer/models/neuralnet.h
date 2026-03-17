@@ -771,6 +771,16 @@ private:
    * @retval true if matches, false is error
    */
   bool validateInput(sharedConstTensors X);
+
+  /**
+   * @brief Get pointers to all trainable weight parameters with their sizes
+   * @return std::vector<std::pair<float*, size_t>> Vector of pointers to weight
+   * parameters and their sizes
+   */
+  std::vector<nntrainer::Tensor *> getParameterPointers();
+
+  
+  void perturbParameters(float epsilon, int seed);
 };
 
 } /* namespace nntrainer */
