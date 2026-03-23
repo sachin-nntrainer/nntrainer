@@ -12,6 +12,7 @@
  * @details wraps the optimizer and learning rate scheduler together
  */
 
+#include <MeZO.h>
 #include <common_properties.h>
 #include <engine.h>
 #include <lr_scheduler_constant.h>
@@ -138,6 +139,33 @@ int OptimizerWrapped::setLearningRateScheduler(
 
 nntrainer::LearningRateScheduler *OptimizerWrapped::getLearningRateScheduler() {
   return lr_sched.get();
+}
+
+void OptimizerWrapped::updateWeightsMeZO(
+  std::vector<nntrainer::Tensor *> &weights, int seed, float loss_plus,
+  float loss_minus) {
+  // Check if the underlying optimizer is MeZO
+  if (optimizer && optimizer->getType() == MeZO::type) {
+    // Cast to MeZO and call the method
+    MeZO *mezo_optimizer = static_cast<MeZO *>(optimizer.get());
+    mezo_optimizer->updateWeightsMeZO(weights, seed, loss_plus, loss_minus);
+  } else {
+    // Handle error or throw exception
+    throw std::runtime_error("updateWeightsMeZO called on non-MeZO optimizer");
+  }
+}
+
+float OptimizerWrapped::getMeZOEpsilon() const {
+  // Check if the underlying optimizer is MeZO
+  if (optimizer && optimizer->getType() == MeZO::type) {
+    // Cast to MeZO and call the method
+    MeZO *mezo_optimizer = static_cast<MeZO *>(optimizer.get());
+    return mezo_optimizer->getEpsilon();
+  } else {
+    // For non-MeZO optimizers, return a default value
+    ml_logw("getEpsilon called on non-MeZO optimizer, returning 0.0f");
+    return 0.0f;
+  }
 }
 
 } // namespace nntrainer

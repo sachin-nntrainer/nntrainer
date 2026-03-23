@@ -148,6 +148,23 @@ public:
    */
   nntrainer::LearningRateScheduler *getLearningRateScheduler();
 
+  /**
+   * @brief Update multiple weights using MeZO gradient estimation
+   * @param weights Vector of weights to update
+   * @param seed Random seed for reproducibility
+   * @param loss_plus Loss with positive perturbation
+   * @param loss_minus Loss with negative perturbation
+   * @param learning_rate Learning rate for weight update
+   */
+  void updateWeightsMeZO(std::vector<nntrainer::Tensor *> &weights, int seed,
+                         float loss_plus, float loss_minus);
+
+  /**
+   * @brief Get the epsilon value for perturbation (for MeZO optimizer)
+   * @return Perturbation magnitude
+   */
+  float getMeZOEpsilon() const;
+
 private:
   std::unique_ptr<OptimizerCore> optimizer; /**< the underlying optimizer */
   std::shared_ptr<nntrainer::LearningRateScheduler>

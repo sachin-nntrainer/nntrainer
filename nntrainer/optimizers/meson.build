@@ -11,6 +11,7 @@ optimizer_sources = [
   'optimizer_wrapped.cpp',
   'adamw.cpp',
   'lion.cpp',
+  'MeZO.cpp',
 ]
 
 optimizer_headers = [

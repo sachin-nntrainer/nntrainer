@@ -31,6 +31,7 @@
 #include <adamw.h>
 #include <lion.h>
 #include <sgd.h>
+#include<MeZO.h>
 
 #include <activation_layer.h>
 #include <add_layer.h>
@@ -108,8 +109,8 @@
 #include <nnstreamer_layer.h>
 #endif
 
-/// add #ifdef across platform
-static std::string solib_suffix = ".so";
+  /// add #ifdef across platform
+  static std::string solib_suffix = ".so";
 static std::string layerlib_suffix = "layer.so";
 static std::string optimizerlib_suffix = "optimizer.so";
 static const std::string func_tag = "[AppContext] ";
@@ -261,6 +262,7 @@ void AppContext::add_default_object() {
   registerFactory(nntrainer::createOptimizer<AdamW>, AdamW::type,
                   OptType::ADAMW);
   registerFactory(nntrainer::createOptimizer<Lion>, Lion::type, OptType::LION);
+  registerFactory(nntrainer::createOptimizer<MeZO>, MeZO::type, OptType::MeZO);
   registerFactory(AppContext::unknownFactory<nntrainer::Optimizer>, "unknown",
                   OptType::UNKNOWN);
 
