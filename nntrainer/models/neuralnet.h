@@ -771,6 +771,23 @@ private:
    * @retval true if matches, false is error
    */
   bool validateInput(sharedConstTensors X);
+
+  /**
+   * @brief Get pointers to all trainable weight parameters with their sizes
+   * @return std::vector<std::pair<float*, size_t>> Vector of pointers to weight
+   * parameters and their sizes
+   */
+  std::vector<nntrainer::Tensor *> getParameterPointers();
+
+  /**
+   * @brief Perturbs all trainable parameters in the network using a normal
+   * distribution
+   * @param epsilon Magnitude of the perturbation to apply
+   * @param seed Random seed for reproducible perturbations
+   * @note This function is used in MeZO optimizer implementation for
+   * zeroth-order optimization
+   */
+  void perturbParameters(float epsilon, int seed);
 };
 
 } /* namespace nntrainer */

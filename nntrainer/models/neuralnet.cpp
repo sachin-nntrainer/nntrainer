@@ -31,6 +31,7 @@
 #include <iomanip>
 #include <sstream>
 
+#include <MeZO.h>
 #include <activation_realizer.h>
 #include <adamw.h>
 #include <common_properties.h>
@@ -784,7 +785,7 @@ void NeuralNetwork::load(const std::string &file_path,
             NNTR_THROW_IF((fd == -1), std::invalid_argument)
               << "Cannot open file : " << f_path;
 
-            struct stat st {};
+            struct stat st{};
             NNTR_THROW_IF((::fstat(fd, &st) == -1), std::invalid_argument)
               << "Cannot get file info (fstat): " << f_path;
 
@@ -1267,7 +1268,11 @@ int NeuralNetwork::train(const std::vector<std::string> &values,
   model_graph.setBatchSize(
     std::get<props::TrainingBatchSize>(model_flex_props));
 
-  status = allocate(ExecutionMode::TRAIN);
+  if (opt->getType() == MeZO::type) {
+    status = allocate(ExecutionMode::INFERENCE);
+  } else {
+    status = allocate(ExecutionMode::TRAIN);
+  }
   NN_RETURN_STATUS();
 
   status =
@@ -1370,10 +1375,35 @@ int NeuralNetwork::train_run(
 
   auto train_for_iteration =
     [this, stop_cb, stop_user_data](RunStats &stat, DataBuffer &buffer) {
-      ml_logi("train for iteration");
-      forwarding(true, stop_cb, stop_user_data);
-      backwarding(iter++, stop_cb, stop_user_data);
+      if (opt->getType() == MeZO::type) {
+        ml_logi("train for iteration using MeZO optimizer");
 
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<int> distrib(0, 1000000000 - 1);
+        int seed = distrib(gen);
+
+        float mezo_epsilon = opt->getMeZOEpsilon();
+
+        perturbParameters(mezo_epsilon, seed);
+        forwarding(true, stop_cb, stop_user_data);
+        float loss_plus = getLoss();
+
+        perturbParameters(-2 * mezo_epsilon, seed);
+        forwarding(true, stop_cb, stop_user_data);
+        float loss_minus = getLoss();
+
+        perturbParameters(mezo_epsilon, seed);
+        float projected_grad = (loss_plus - loss_minus) / (2.0f * mezo_epsilon);
+
+        auto param_ptrs = getParameterPointers();
+        opt->updateWeightsMeZO(param_ptrs, seed, loss_plus, loss_minus);
+
+      } else {
+        ml_logi("train for iteration");
+        forwarding(true, stop_cb, stop_user_data);
+        backwarding(iter++, stop_cb, stop_user_data);
+      }
       // To avoid unconsidered memory leak, we need to clear the cache
       model_graph.flushCache();
 
@@ -1892,6 +1922,40 @@ void NeuralNetwork::exports(const ml::train::ExportMethods &method,
   }
   default:
     throw std::runtime_error{"Unsupported export method"};
+  }
+}
+
+std::vector<nntrainer::Tensor *> NeuralNetwork::getParameterPointers() {
+  std::vector<nntrainer::Tensor *> params;
+  forEachLayer(
+    [&](ml::train::Layer &layer, RunLayerContext &rc, void *user_data) {
+      LayerNode &ln = static_cast<LayerNode &>(layer);
+      // Only include parameters from trainable layers
+      if (ln.getTrainable()) {
+        for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
+          params.push_back(&ln.getWeight(i));
+        }
+      }
+    },
+    nullptr);
+  return params;
+}
+
+void NeuralNetwork::perturbParameters(float epsilon, int seed) {
+  auto param_ptrs = getParameterPointers();
+  std::mt19937 gen(seed);
+  std::normal_distribution<float> normal_dist(0.0f, 1.0f);
+
+  for (const auto *ptr : param_ptrs) {
+    float *data = (float *)(ptr->getData());
+    size_t param_size = ptr->getDim().getDataLen();
+    for (size_t i = 0; i < param_size; ++i) {
+      // Apply perturbation based on direction:
+      // +1: add ε·z (for positive perturbation)
+      // -1: subtract ε·z (for negative perturbation)
+      // -2: subtract 2ε·z (to go from θ+ε·z to θ-ε·z)
+      data[i] += epsilon * normal_dist(gen);
+    }
   }
 }
 } /* namespace nntrainer */
