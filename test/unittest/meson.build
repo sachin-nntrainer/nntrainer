@@ -77,6 +77,7 @@ test_target = [
   ['unittest_nntrainer_lr_scheduler', []],
   ['unittest_nntrainer_save_with_dtype', []],
   ['unittest_thread_manager', []],
+  ['unittest_nntrainer_mezo_interface', []]
   #['unittest_nntrainer_task', []],
 ]
 
