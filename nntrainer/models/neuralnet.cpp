@@ -1470,7 +1470,11 @@ int NeuralNetwork::train(const std::vector<std::string> &values,
   model_graph.setBatchSize(
     std::get<props::TrainingBatchSize>(model_flex_props));
 
-  status = allocate(ExecutionMode::TRAIN);
+  if (opt->requiresBackprop()) {
+    status = allocate(ExecutionMode::TRAIN);
+  } else {
+    status = allocate(ExecutionMode::INFERENCE);
+  }
   NN_RETURN_STATUS();
 
   status =
@@ -1573,10 +1577,20 @@ int NeuralNetwork::train_run(
 
   auto train_for_iteration =
     [this, stop_cb, stop_user_data](RunStats &stat, DataBuffer &buffer) {
-      ml_logi("train for iteration");
-      forwarding(true, stop_cb, stop_user_data);
-      backwarding(iter++, stop_cb, stop_user_data);
-
+      if (!opt->requiresBackprop()) {
+        ml_logi("train for iteration using gradient-free optimizer");
+        auto param_ptrs = getParameterPointers();
+        opt->trainStep(
+          [this, stop_cb, stop_user_data]() {
+            forwarding(true, stop_cb, stop_user_data);
+          },
+          [this]() { return getLoss(); }, param_ptrs);
+        iter++;
+      } else {
+        ml_logi("train for iteration");
+        forwarding(true, stop_cb, stop_user_data);
+        backwarding(iter++, stop_cb, stop_user_data);
+      }
       // To avoid unconsidered memory leak, we need to clear the cache
       model_graph.flushCache();
 
@@ -2097,4 +2111,20 @@ void NeuralNetwork::exports(const ml::train::ExportMethods &method,
     throw std::runtime_error{"Unsupported export method"};
   }
 }
+
+std::vector<nntrainer::Tensor *> NeuralNetwork::getParameterPointers() {
+  std::vector<nntrainer::Tensor *> params;
+  forEachLayer(
+    [&](ml::train::Layer &layer, RunLayerContext &rc, void *user_data) {
+      LayerNode &ln = static_cast<LayerNode &>(layer);
+      if (ln.getTrainable()) {
+        for (unsigned int i = 0; i < ln.getNumWeights(); ++i) {
+          params.push_back(&ln.getWeight(i));
+        }
+      }
+    },
+    nullptr);
+  return params;
+}
+
 } /* namespace nntrainer */

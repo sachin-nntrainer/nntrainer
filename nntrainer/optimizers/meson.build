@@ -11,6 +11,7 @@ optimizer_sources = [
   'optimizer_wrapped.cpp',
   'adamw.cpp',
   'lion.cpp',
+  'mezo.cpp',
 ]
 
 optimizer_headers = [
@@ -27,4 +28,3 @@ endforeach
 foreach h : optimizer_headers
   nntrainer_headers += meson.current_source_dir() / h
 endforeach
-
