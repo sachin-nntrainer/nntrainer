@@ -53,7 +53,7 @@ public:
    */
   virtual void trainStep(std::function<void()> forward_fn,
                          std::function<float()> get_loss_fn,
-                         std::vector<Tensor *> &params) {};
+                         std::vector<Tensor *> &params){};
 
   /**
    * @brief     get Learning Rate
@@ -86,7 +86,7 @@ public:
   /**
    * @brief     finalize optimizer.
    */
-  virtual void finalize() {};
+  virtual void finalize(){};
 
   /**
    * @brief     Read Training optimizer parameters from file

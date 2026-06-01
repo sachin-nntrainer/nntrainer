@@ -74,12 +74,14 @@ int getSample(float **outVec, float **outLabel, bool *last, void *user_data) {
   unsigned int idx = ud->indices[ud->current_index];
 
   // Copy input data
-  std::copy(ud->data.begin() + idx * ud->feature_size,
-            ud->data.begin() + (idx + 1) * ud->feature_size, *outVec);
+  std::copy(ud->data.begin() + static_cast<size_t>(idx) * ud->feature_size,
+            ud->data.begin() + static_cast<size_t>(idx + 1) * ud->feature_size,
+            *outVec);
 
   // Copy label data
-  std::copy(ud->labels.begin() + idx * ud->label_size,
-            ud->labels.begin() + (idx + 1) * ud->label_size, *outLabel);
+  std::copy(ud->labels.begin() + static_cast<size_t>(idx) * ud->label_size,
+            ud->labels.begin() + static_cast<size_t>(idx + 1) * ud->label_size,
+            *outLabel);
 
   ud->current_index++;
 
