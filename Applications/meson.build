@@ -63,4 +63,6 @@ endif
 subdir('Optimizers/jni')
 
 # MeZO training example
-subdir('MeZO/jni')
+if get_option('platform') != 'tizen' and host_machine.system() != 'windows'
+  subdir('MeZO/jni')
+endif

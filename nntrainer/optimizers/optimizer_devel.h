@@ -49,11 +49,11 @@ public:
    * @param[in] forward_fn Function to perform forward pass
    * @param[in] get_loss_fn Function to get current loss
    * @param[in] params Vector of parameter tensors to update
+   * @note      Default is no-op; gradient-free optimizers override this.
    */
-  virtual void trainStep(
-    std::function<void()> forward_fn, std::function<float()> get_loss_fn,
-    std::vector<Tensor *>
-      &params) { /**< default: no-op, backprop optimizers use existing path */ }
+  virtual void trainStep(std::function<void()> forward_fn,
+                         std::function<float()> get_loss_fn,
+                         std::vector<Tensor *> &params) {};
 
   /**
    * @brief     get Learning Rate
